@@ -62,6 +62,7 @@ dl.terms{margin:0}dl.terms dt{font-weight:700;margin-top:8px}dl.terms dd{margin:
 .opt.sel{border-color:var(--blue);background:var(--blue-soft)}
 .opt.ok{border-color:var(--green);background:var(--green-soft)}
 .opt.bad{border-color:var(--coral);background:var(--coral-soft)}
+.opt.sel.bad{border-color:var(--coral);background:var(--coral-soft)}
 .mrow{display:grid;grid-template-columns:minmax(120px,1fr) 2fr;gap:10px;align-items:center;margin:8px 0}
 .mrow select{width:100%}
 .mrow.ok select{border-color:var(--green);background:var(--green-soft)}.mrow.bad select{border-color:var(--coral);background:var(--coral-soft)}
@@ -169,10 +170,11 @@ footer{margin-top:30px;font-size:13px;color:var(--muted);text-align:center}
 <!-- ============ КОНТРОЛЬНАЯ ============ -->
 <section class="tab" id="exam">
  <div class="card"><b>Пробная контрольная</b> — 30 заданий по всему учебнику, в стиле раздела «Готовимся к аттестации».
-  <div class="muted" style="margin-top:6px">Отвечайте на все задания, затем нажмите «Проверить» внизу. Последнее задание проверьте сами по образцу.</div>
+  <div class="muted" style="margin-top:6px">Выберите ответ и нажмите «Проверить ответ» под заданием. Если ошибка — внизу появится правильный ответ: исправьте и проверьте снова. Баллы считаются по первой попытке. В конце нажмите «Итог».</div>
  </div>
+ <div id="exBanner"></div>
  <div id="examArea"></div>
- <div class="row"><button class="btn violet" id="exCheck">Проверить контрольную</button><button class="btn sec" id="exReset">Начать заново</button></div>
+ <div class="row"><button class="btn violet" id="exCheck">Итог: баллы и оценка</button><button class="btn sec" id="exReset">Вся контрольная заново</button></div>
  <div id="exResult"></div>
 </section>
 
@@ -325,57 +327,102 @@ $('#trArea').innerHTML = '<div class="card muted">Выберите, что тр�
 const norm = s => s.toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9 ]/g, '').replace(/\s+/g, ' ').trim();
 function ptsOf(q) { return q.t === 'choice' || q.t === 'text' ? 1 : q.t === 'multi' || q.t === 'order' ? 2 : q.t === 'match' ? q.l.length : 0; }
 const MAX = TEST.reduce((s, q) => s + ptsOf(q), 0);
-function renderExam() {
+const pw = p => p === 1 ? 'балл' : p < 5 ? 'балла' : 'баллов';
+let first = [], solved = [], LIST = [], REPEAT = false;
+function rightText(q) {
+  if (q.t === 'choice') return 'Правильный ответ: ' + q.o[q.a];
+  if (q.t === 'multi') return 'Правильные ответы: ' + q.a.map(k => q.o[k]).join('; ');
+  if (q.t === 'match') return 'Правильно: ' + q.l.map((l, k) => `${l} — ${q.r[q.a[k]]}`).join('; ');
+  if (q.t === 'order') return 'Правильный порядок: ' + q.a.map(k => q.i[k]).join(' → ');
+  if (q.t === 'text') return 'Правильный ответ: ' + q.a[0].replace(/^./, c => c.toUpperCase()).replace('Сегун', 'Сёгун');
+  return '';
+}
+function fbSet(i, ok, html) { const el = $('#fb' + i); el.className = 'fb show ' + (ok ? 'ok' : 'bad'); el.innerHTML = html; }
+function renderExam(list) {
+  REPEAT = !!list; LIST = list || TEST.map((q, i) => i);
+  first = TEST.map(() => null); solved = TEST.map(() => false);
   $('#exResult').innerHTML = '';
-  $('#examArea').innerHTML = TEST.map((q, i) => {
-    let body = '';
-    if (q.t === 'choice' || q.t === 'multi') body = q.o.map((o, k) => `<button class="opt" data-q="${i}" data-k="${k}">${q.t === 'multi' ? '☐ ' : ''}${esc(o)}</button>`).join('');
+  $('#exBanner').innerHTML = REPEAT ? `<div class="card" style="background:var(--coral-soft);border-color:var(--coral)"><b>Повторение ошибок:</b> ${LIST.length} ${LIST.length === 1 ? 'задание' : LIST.length < 5 ? 'задания' : 'заданий'}. Решите их ещё раз — теперь без подсказок до проверки.</div>` : '';
+  $('#examArea').innerHTML = LIST.map(i => { const q = TEST[i];
+    let body = '', btn = `<button class="btn sec chk" data-q="${i}" style="margin-top:8px">Проверить ответ</button>`;
+    if (q.t === 'choice') body = q.o.map((o, k) => `<button class="opt" data-q="${i}" data-k="${k}">${esc(o)}</button>`).join('');
+    if (q.t === 'multi') body = q.o.map((o, k) => `<button class="opt" data-q="${i}" data-k="${k}">☐ ${esc(o)}</button>`).join('');
     if (q.t === 'match') { const rs = shuffle(q.r.map((r, k) => k));
       body = q.l.map((l, k) => `<div class="mrow" id="m${i}_${k}"><b>${esc(l)}</b><select data-q="${i}" data-k="${k}"><option value="">— выберите —</option>${rs.map(j => `<option value="${j}">${esc(q.r[j])}</option>`).join('')}</select></div>`).join(''); }
     if (q.t === 'order') body = q.i.map((it, k) => `<div class="ord" id="o${i}_${k}"><select data-q="${i}" data-k="${k}"><option value="">№</option>${q.i.map((_, j) => `<option>${j + 1}</option>`).join('')}</select><span>${esc(it)}</span></div>`).join('') + '<div class="muted" style="font-size:13px">Поставьте номер: 1 — самое раннее событие.</div>';
     if (q.t === 'text') body = `<input class="ta" id="t${i}" placeholder="Ваш ответ" autocomplete="off">`;
-    if (q.t === 'open') body = `<textarea id="t${i}" placeholder="Напишите ответ своими словами"></textarea>`;
+    if (q.t === 'open') { body = `<textarea id="t${i}" placeholder="Напишите ответ своими словами"></textarea>`; btn = `<button class="btn sec chk" data-q="${i}" style="margin-top:8px">Показать образец ответа</button>`; }
     const p = ptsOf(q);
-    return `<div class="card q" id="q${i}"><span class="pts">${p ? p + ' ' + (p === 1 ? 'балл' : p < 5 ? 'балла' : 'баллов') : 'самопроверка'}</span><h3><span class="num">${i + 1}.</span>${esc(q.q)}</h3>${body}<div class="fb" id="fb${i}"></div></div>`;
+    return `<div class="card q" id="q${i}"><span class="pts">${p ? p + ' ' + pw(p) : 'самопроверка'}</span><h3><span class="num">${i + 1}.</span>${esc(q.q)}</h3>${body}${btn}<div class="fb" id="fb${i}"></div></div>`;
   }).join('');
-  document.querySelectorAll('#examArea .opt').forEach(b => b.onclick = () => {
-    if (window.exChecked) return;
-    const q = TEST[b.dataset.q];
-    if (q.t === 'choice') document.querySelectorAll(`#examArea .opt[data-q="${b.dataset.q}"]`).forEach(x => x.classList.remove('sel'));
-    b.classList.toggle('sel');
-    if (q.t === 'multi') b.textContent = (b.classList.contains('sel') ? '☑ ' : '☐ ') + q.o[b.dataset.k];
-  });
-  window.exChecked = false;
+  document.querySelectorAll('#examArea .opt').forEach(b => b.onclick = () => clickOpt(+b.dataset.q, +b.dataset.k, b));
+  document.querySelectorAll('#examArea .chk').forEach(b => b.onclick = () => checkQ(+b.dataset.q));
+  document.querySelectorAll('#examArea select').forEach(s => s.onchange = () => { const row = s.parentElement; row.classList.remove('ok', 'bad'); });
+  document.querySelectorAll('#examArea input.ta').forEach(s => { s.oninput = () => s.classList.remove('ok', 'bad'); s.onkeydown = e => { if (e.key === 'Enter') checkQ(+s.id.slice(1)); }; });
 }
-function checkExam() {
-  if (window.exChecked) return; window.exChecked = true;
-  let score = 0;
-  TEST.forEach((q, i) => {
-    let got = 0, fb = '';
-    const sel = [...document.querySelectorAll(`#examArea .opt.sel[data-q="${i}"]`)].map(b => +b.dataset.k);
-    if (q.t === 'choice') { got = sel[0] === q.a ? 1 : 0; fb = 'Правильный ответ: ' + q.o[q.a];
-      document.querySelectorAll(`#examArea .opt[data-q="${i}"]`).forEach(b => { const k = +b.dataset.k; if (k === q.a) b.classList.add('ok'); else if (sel.includes(k)) b.classList.add('bad'); }); }
-    if (q.t === 'multi') { const right = sel.filter(k => q.a.includes(k)).length, wrongN = sel.length - right;
-      got = right === 2 && wrongN === 0 ? 2 : (right >= 1 && sel.length <= 2 ? 1 : 0);
-      fb = 'Правильно: ' + q.a.map(k => q.o[k]).join('; ');
-      document.querySelectorAll(`#examArea .opt[data-q="${i}"]`).forEach(b => { const k = +b.dataset.k; if (q.a.includes(k)) b.classList.add('ok'); else if (sel.includes(k)) b.classList.add('bad'); }); }
-    if (q.t === 'match') { q.l.forEach((l, k) => { const s = document.querySelector(`select[data-q="${i}"][data-k="${k}"]`); const ok = s.value !== '' && +s.value === q.a[k]; if (ok) got++; $(`#m${i}_${k}`).classList.add(ok ? 'ok' : 'bad'); s.disabled = true; });
-      fb = 'Правильно: ' + q.l.map((l, k) => `${l} — ${q.r[q.a[k]]}`).join('; '); }
-    if (q.t === 'order') { let all = true; q.i.forEach((it, k) => { const s = document.querySelector(`select[data-q="${i}"][data-k="${k}"]`); const pos = q.a.indexOf(k) + 1; const ok = +s.value === pos; if (!ok) all = false; $(`#o${i}_${k}`).classList.add(ok ? 'ok' : 'bad'); s.disabled = true; });
-      got = all ? 2 : 0; fb = 'Правильный порядок: ' + q.a.map(k => q.i[k]).join(' → '); }
-    if (q.t === 'text') { const inp = $('#t' + i); const ok = q.a.some(a => norm(inp.value) === norm(a)); got = ok ? 1 : 0; inp.classList.add(ok ? 'ok' : 'bad'); inp.disabled = true; fb = 'Ответ: ' + q.a[0].replace(/^./, c => c.toUpperCase()).replace('Сегун', 'Сёгун'); }
-    if (q.t === 'open') { fb = '<b>Образец ответа для самопроверки:</b> ' + esc(q.s); }
-    score += got;
-    const el = $('#fb' + i); const full = got === ptsOf(q);
-    el.className = 'fb show ' + (q.t === 'open' ? 'ok' : full ? 'ok' : 'bad');
-    el.innerHTML = q.t === 'open' ? fb : `${full ? '✓' : '✗'} ${got} из ${ptsOf(q)}. ${q.t === 'open' ? fb : esc(fb)}`;
-  });
-  const pct = score / MAX, grade = pct >= 0.85 ? 5 : pct >= 0.65 ? 4 : pct >= 0.45 ? 3 : 2;
-  const best = Math.max(store.get('best', 0), score); store.set('best', best);
-  $('#exResult').innerHTML = `<div class="card result"><div class="grade">${grade}</div><p><b>${score} из ${MAX} баллов</b> (${Math.round(pct * 100)}%). Лучший результат: ${best}.</p><p class="muted">Оценка примерная: «5» — от 85%, «4» — от 65%, «3» — от 45%. Ошибки отмечены красным, под каждым заданием — правильный ответ.</p></div>`;
+function lock(i) { solved[i] = true; document.querySelectorAll(`#q${i} select, #q${i} input, #q${i} .chk`).forEach(x => x.disabled = true); }
+function clickOpt(i, k, b) {
+  const q = TEST[i]; if (solved[i]) return;
+  if (q.t === 'choice') { document.querySelectorAll(`#q${i} .opt`).forEach(x => x.classList.remove('sel', 'bad', 'ok')); b.classList.add('sel'); return; }
+  b.classList.toggle('sel'); b.classList.remove('ok', 'bad');
+  b.textContent = (b.classList.contains('sel') ? '☑ ' : '☐ ') + q.o[k];
+}
+function checkQ(i) {
+  const q = TEST[i]; if (solved[i]) return;
+  let got = 0, full = false;
+  if (q.t === 'open') { fbSet(i, true, '<b>Образец ответа для самопроверки:</b> ' + esc(q.s) + '<br>Сравните со своим ответом и допишите, чего не хватает.'); solved[i] = true; $(`#q${i} .chk`).disabled = true; return; }
+  if (q.t === 'choice') {
+    const selB = document.querySelector(`#q${i} .opt.sel`);
+    if (!selB) { fbSet(i, false, 'Сначала выберите ответ.'); return; }
+    full = +selB.dataset.k === q.a; got = full ? 1 : 0;
+    selB.classList.remove('sel'); selB.classList.add(full ? 'ok' : 'bad'); if (!full) selB.classList.add('sel');
+  }
+  if (q.t === 'multi') {
+    const sel = [...document.querySelectorAll(`#q${i} .opt.sel`)].map(b => +b.dataset.k);
+    if (!sel.length) { fbSet(i, false, 'Сначала выберите ответы.'); return; }
+    const right = sel.filter(k => q.a.includes(k)).length;
+    full = right === 2 && sel.length === 2; got = full ? 2 : (right >= 1 && sel.length <= 2 ? 1 : 0);
+    document.querySelectorAll(`#q${i} .opt`).forEach(b => { const k = +b.dataset.k; b.classList.remove('ok', 'bad'); if (sel.includes(k)) b.classList.add(q.a.includes(k) ? 'ok' : 'bad'); });
+  }
+  if (q.t === 'match' || q.t === 'order') {
+    const sels = [...document.querySelectorAll(`#q${i} select`)];
+    if (sels.some(s => s.value === '')) { fbSet(i, false, 'Заполните все строки, потом нажмите «Проверить ответ».'); return; }
+    let n = 0;
+    sels.forEach((s, k) => { const ok = q.t === 'match' ? +s.value === q.a[k] : +s.value === q.a.indexOf(k) + 1; if (ok) n++; s.parentElement.classList.remove('ok', 'bad'); s.parentElement.classList.add(ok ? 'ok' : 'bad'); });
+    full = n === sels.length; got = q.t === 'match' ? n : (full ? 2 : 0);
+  }
+  if (q.t === 'text') {
+    const inp = $('#t' + i); if (!inp.value.trim()) { fbSet(i, false, 'Сначала впишите ответ.'); return; }
+    full = q.a.some(a => norm(inp.value) === norm(a)); got = full ? 1 : 0; inp.classList.remove('ok', 'bad'); inp.classList.add(full ? 'ok' : 'bad');
+  }
+  if (first[i] === null) first[i] = got;
+  if (full) { lock(i); document.querySelectorAll(`#q${i} .opt`).forEach(b => b.onclick = null);
+    fbSet(i, true, first[i] === ptsOf(q) ? '✓ Верно!' : '✓ Теперь верно. Запомните этот ответ.'); }
+  else fbSet(i, false, (q.t === 'choice' ? '✗ Неверно. ' : '✗ Есть ошибки (красным). ') + esc(rightText(q)) + '<br>Исправьте ответ и снова нажмите «Проверить ответ».');
+}
+function showResult() {
+  const scored = LIST.filter(i => ptsOf(TEST[i]));
+  const max = scored.reduce((s, i) => s + ptsOf(TEST[i]), 0);
+  const score = scored.reduce((s, i) => s + (first[i] || 0), 0);
+  const skipped = scored.filter(i => first[i] === null);
+  const errs = scored.filter(i => first[i] !== null && first[i] < ptsOf(TEST[i]));
+  const nums = a => a.map(i => i + 1).join(', ');
+  const again = errs.concat(skipped).sort((x, y) => x - y);
+  let head;
+  if (REPEAT) head = `<div class="grade">${scored.length - again.length}/${scored.length}</div><p><b>Повторение:</b> с первой попытки верно ${scored.length - again.length} из ${scored.length} заданий.</p>`;
+  else { const pct = score / max, grade = pct >= 0.85 ? 5 : pct >= 0.65 ? 4 : pct >= 0.45 ? 3 : 2;
+    const best = Math.max(store.get('best', 0), score); store.set('best', best);
+    head = `<div class="grade">${grade}</div><p><b>${score} из ${max} баллов</b> (${Math.round(pct * 100)}%) — по первой попытке. Лучший результат: ${best}.</p><p class="muted">Оценка примерная: «5» — от 85%, «4» — от 65%, «3» — от 45%.</p>`; }
+  $('#exResult').innerHTML = `<div class="card result">${head}
+   ${errs.length ? `<p>Ошибки с первой попытки в заданиях: <b>${nums(errs)}</b>.</p>` : ''}
+   ${skipped.length ? `<p style="color:#b8452f">Не выполнены задания: <b>${nums(skipped)}</b>.</p>` : ''}
+   ${again.length ? '' : '<p>🎉 Все задания решены верно с первой попытки!</p>'}
+   <div class="row" style="justify-content:center;margin-top:12px">${again.length ? '<button class="btn coral" id="exAgain">Повторить ошибки</button>' : ''}<button class="btn sec" id="exNew">Вся контрольная заново</button></div></div>`;
+  if (again.length) $('#exAgain').onclick = () => { renderExam(again); window.scrollTo({top: 0}); };
+  $('#exNew').onclick = () => { renderExam(); window.scrollTo({top: 0}); };
   $('#exResult').scrollIntoView({behavior: 'smooth'});
 }
-$('#exCheck').onclick = checkExam;
+$('#exCheck').onclick = showResult;
 $('#exReset').onclick = () => { renderExam(); window.scrollTo({top: 0}); };
 renderExam();
 </script>
